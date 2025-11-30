@@ -1,29 +1,28 @@
 # String Cheese
 
-Whoever invented the foodstuff known as string cheese is either a genius or a madman.
+Using the rope pattern to build a small string library. It has an intended use-case within [Toy](https://github.com/krgamestudios/Toy).
+
+Cue the cheesy jokes.
+
+## Planned Features
+
+* [X] allocate ropes
+* [ ] release ropes
+* [ ] split ropes
+* [X] concat ropes
+* [ ] insert (split, concat, concat)
+* [ ] delete (split, split, concat)
+* [ ] auto-balancing
 
 ## Known Issues
 
-Apart from being incomplete:
+* [ ] All in `main.c` (will split it up later)
+* [ ] No ref-counting (makes clearing unneeded entries easier)
+* [ ] Limited capacity defined by `RESERVED_ROPES` and `RESERVED_STRINGS`
+* [ ] Maximum string length is 1024 (could add another rope type for higher values)
 
-* No auto-balancing
-* Still using malloc & free
-* Returning a ptr to a local var is bad
+## Testing
 
-## Random Thoughts
-
-* An arena can contain multiple buckets, one for each size of memory allocation
-* One bucket can also hold *just* the rope nodes
-* The strings need a dedicated allocation system, divided by string lengths
-
-## Needed features:
-
-* allocate/release
-* split
-* concat
-* append - concat(a, b)
-* insert - split, concat, concat
-* delete - split, split, concat
-* auto-balancing - children should be balanced first
-* rotate left
-* rotate right
+* [ ] Fuzzing
+* [ ] Regression
+* [ ] CI/CD

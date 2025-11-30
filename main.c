@@ -1,17 +1,20 @@
-#include <assert.h>
+#include <sys/mman.h>
 #include <stddef.h>
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
 
-typedef void* (*rope_alloc_t)(size_t);
-typedef void (*rope_free_t)(void*);
+#define RESERVED_ROPES		4000
+#define RESERVED_STRINGS	4000
 
 //Ropes are tagged unions
 typedef struct Rope {
 	enum Type { LEAF, BRANCH } type;
+	size_t weight; //tree-balancing
 	union {
-		const char* const c_str;
+		struct {
+			size_t length; //length of the c-string - rounding up determines which bucket to use
+			size_t entry; //the nth entry of the bucket
+		} leaf;
+
 		struct {
 			struct Rope* left;
 			struct Rope* right;
@@ -19,84 +22,108 @@ typedef struct Rope {
 	} as;
 } Rope;
 
-Rope alloc_rope(rope_alloc_t alloc, const char* str) {
-	assert(str);
+//Knots are collections of ropes and strings
+typedef struct Knot {
+	size_t ropes_reserved;
+	Rope* ropes_bucket;
+	size_t ropes_probe;
 
-	size_t len = strlen(str);
-	void* ptr = alloc(len + 1);
-	memcpy(ptr, str, len + 1);
+	//each pair is for a different string length
+	struct {
+		size_t reserved;
+		void* bucket;
+		size_t probe;
+	} string16, string32, string64, string128, string256, string512, string1024;
+} Knot;
 
-	return (Rope){LEAF,{ .c_str = ptr }};
+Knot make_knot() {
+	Knot knot = {0};
+
+	knot.ropes_reserved = RESERVED_ROPES * sizeof(Rope);
+	knot.ropes_bucket = mmap(NULL, knot.ropes_reserved, PROT_READ, MAP_PRIVATE|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0);
+	knot.ropes_probe = 0;
+
+#define KNOT_STRING_MMAP(LENGTH) \
+	knot.string##LENGTH.reserved = RESERVED_STRINGS * (sizeof(char) * LENGTH); \
+	knot.string##LENGTH.bucket = mmap(NULL, knot.string##LENGTH.reserved, PROT_READ, MAP_PRIVATE|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0); \
+	knot.ropes_probe = 0;
+
+	KNOT_STRING_MMAP(16);
+	KNOT_STRING_MMAP(32);
+	KNOT_STRING_MMAP(64);
+	KNOT_STRING_MMAP(128);
+	KNOT_STRING_MMAP(256);
+	KNOT_STRING_MMAP(512);
+	KNOT_STRING_MMAP(1024);
+
+#undef KNOT_STRING_MMAP
+
+	return knot;
 }
 
-void free_rope(rope_free_t free, Rope* rope) {
-	if (rope->type == LEAF) {
-		free((void*)(rope->as.c_str));
-	}
-	else if (rope->type == BRANCH) {
-		free_rope(free, rope->as.branch.left);
-		free_rope(free, rope->as.branch.right);
-	}
-	else {
-		assert(0);
-	}
-}
+void unmake_knot(Knot* knot) {
+	munmap(knot->ropes_bucket, knot->ropes_reserved);
 
-Rope concat_rope(Rope* left, Rope* right) {
-	return (Rope){BRANCH,{ .branch = {left,right} }};
-}
+#define KNOT_STRING_MUNMAP(LENGTH) munmap(knot->string##LENGTH.bucket, knot->string##LENGTH.reserved)
 
-void dbg_print_rope(Rope* rope, int prefix_width) {
-	assert(rope);
+	KNOT_STRING_MUNMAP(16);
+	KNOT_STRING_MUNMAP(32);
+	KNOT_STRING_MUNMAP(64);
+	KNOT_STRING_MUNMAP(128);
+	KNOT_STRING_MUNMAP(256);
+	KNOT_STRING_MUNMAP(512);
+	KNOT_STRING_MUNMAP(1024);
 
-	if (rope->type == LEAF) {
-		printf("%*s%s\n",
-			prefix_width, //left-pad
-			prefix_width > 0 ? "+-" : "", //left-pad contents
-			rope->as.c_str
-		);
-	}
-	else if (rope->type == BRANCH) {
-		dbg_print_rope(rope->as.branch.left, prefix_width + 2);
-		dbg_print_rope(rope->as.branch.right, prefix_width + 2);
-	}
-	else {
-		assert(0);
-	}
+#undef KNOT_STRING_MUNMAP
 }
 
 int main() {
-	// Rope rope = alloc_rope(malloc, "Hello world!");
-	// dbg_print_rope(&rope, 0);
-	// free_rope(free, &rope);
 
-	Rope a = alloc_rope(malloc, "Alfa");
-	Rope b = alloc_rope(malloc, "Bravo");
-	Rope c = alloc_rope(malloc, "Charlie");
-	Rope d = alloc_rope(malloc, "Delta");
-	Rope e = alloc_rope(malloc, "Echo");
-	Rope f = alloc_rope(malloc, "Foxtrot");
+#define printf_sz(X) printf("sizeof " #X ": %ld\n", sizeof(X))
+#define printf_ld(X) printf(#X ": %ld\n", X)
+#define printf_kb(X) printf(#X ": %ldkb\n", X/1024)
 
-	Rope ab = concat_rope(&a, &b);
-	Rope abc = concat_rope(&ab, &c);
-	Rope abcd = concat_rope(&abc, &d);
-	Rope abcde = concat_rope(&abcd, &e);
-	Rope abcdef = concat_rope(&abcde, &f);
+	printf_ld(RESERVED_ROPES);
+	printf_ld(RESERVED_STRINGS);
 
-	dbg_print_rope(&abcdef, 0);
+	printf_sz(Rope);
+	printf_sz(Knot);
+
+	Knot knot = make_knot();
+
+	printf_ld(knot.ropes_reserved);
+	printf_ld(knot.string16.reserved);
+	printf_ld(knot.string32.reserved);
+	printf_ld(knot.string64.reserved);
+	printf_ld(knot.string128.reserved);
+	printf_ld(knot.string256.reserved);
+	printf_ld(knot.string512.reserved);
+	printf_ld(knot.string1024.reserved);
+
+	printf_kb(knot.ropes_reserved);
+	printf_kb(knot.string16.reserved);
+	printf_kb(knot.string32.reserved);
+	printf_kb(knot.string64.reserved);
+	printf_kb(knot.string128.reserved);
+	printf_kb(knot.string256.reserved);
+	printf_kb(knot.string512.reserved);
+	printf_kb(knot.string1024.reserved);
+
+	//total space reserved
+	size_t total_reserved = knot.ropes_reserved
+		+ knot.string16.reserved
+		+ knot.string32.reserved
+		+ knot.string64.reserved
+		+ knot.string128.reserved
+		+ knot.string256.reserved
+		+ knot.string512.reserved
+		+ knot.string1024.reserved
+	;
+
+	printf_ld(total_reserved);
+	printf_kb(total_reserved);
+
+	unmake_knot(&knot);
 
 	return 0;
 }
-
-
-//split
-//concat
-
-//append - concat(a, b)
-//insert - split, concat, concat
-//delete - split, split, concat
-
-
-//auto-balancing - children should be balanced first
-//rotate left
-//rotate right
